@@ -1,0 +1,13 @@
+[package]
+name = "fat32x"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror = "1.0"
+fuser = "0.14"
+libc = "0.2"
+clap = { version = "4.5.4", features = ["derive"] }
+# rusb = "0.9"
