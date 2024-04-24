@@ -13,7 +13,7 @@ impl BlkDevice {
             .write(false)
             .truncate(false)
             .read(true)
-            .open(&name)
+            .open(name)
             .expect("device can't be opened");
         BlkDevice { file }
     }

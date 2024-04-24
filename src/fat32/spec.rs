@@ -98,7 +98,7 @@ impl BootSec {
     }
 
     pub fn data_sectors(&self) -> u32 {
-        self.bpb_tot_sec_32.value - self.data_start_sector() as u32
+        self.bpb_tot_sec_32.value - self.data_start_sector()
     }
 
     pub fn cluster_size(&self) -> u32 {
@@ -175,27 +175,27 @@ impl DirEntSfn {
 
     // `imprecise`
     pub fn name(&self) -> String {
-        let mut name = self.name.value.clone();
+        let mut name = self.name.value;
         if name[0] == 0x05 {
             name[0] = 0xE5;
         };
 
         let mut res = String::new();
-        for i in 0..8 {
-            if name[i] == b' ' {
+        for &ch in name.iter().take(8) {
+            if ch == b' ' {
                 break;
             }
-            res.push(name[i].into());
+            res.push(ch.into());
         }
 
         let mut ext_str = String::new();
-        for i in 8..11 {
-            if name[i] != b' ' {
-                ext_str.push(name[i].into());
+        for &ch in name.iter().skip(8) {
+            if ch != b' ' {
+                ext_str.push(ch.into());
             }
         }
 
-        if ext_str.len() > 0 {
+        if !ext_str.is_empty() {
             res.push('.');
             res.push_str(&ext_str);
         }
@@ -273,7 +273,7 @@ impl DirEntSfn {
             None => return None,
         };
         let naive_dt = NaiveDateTime::new(naive_date, naive_time);
-        return Some(Utc.from_utc_datetime(&naive_dt).into());
+        Some(Utc.from_utc_datetime(&naive_dt).into())
     }
 
     pub fn wrt_time(&self) -> SystemTime {

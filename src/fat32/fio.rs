@@ -71,7 +71,7 @@ impl Fat {
             en => panic!("fs err: trying to iterate a {:#?} Fat entry", en),
         };
         FatIter {
-            fat: &self,
+            fat: self,
             device,
             next_clusno: Some(first_clusno),
         }
@@ -176,10 +176,9 @@ impl<'a> Fio<'a> {
                             break;
                         }
                         ents.push(DirEnt::Sfn(en));
-                        match File::try_from(ents) {
-                            Ok(file) => res.push(file),
-                            Err(_) => (),
-                        }
+                        if let Ok(file) = File::try_from(ents) {
+                            res.push(file)
+                        };
                         ents = vec![];
                     }
                 };
@@ -223,7 +222,7 @@ impl TryFrom<Vec<DirEnt>> for File {
         let mut name = sfn.name();
 
         // process lfn and build name if valid
-        if ents.len() > 0 && ents.len() <= 20 {
+        if !ents.is_empty() && ents.len() <= 20 {
             // extract
             let lfns: Vec<&DirEntLfn> = ents
                 .iter()
@@ -252,11 +251,14 @@ impl TryFrom<Vec<DirEnt>> for File {
                 // check order
                 if lfns
                     .iter()
-                    .fold(Some(ents.len() + 1), |acc, &en| match acc {
-                        Some(prev_ord) if prev_ord - 1 == en.ordno().into() => Some(prev_ord - 1),
-                        _ => None,
+                    .try_fold(ents.len() + 1, |acc, &en| {
+                        if acc - 1 == en.ordno().into() {
+                            Ok(acc - 1)
+                        } else {
+                            Err(0)
+                        }
                     })
-                    == None
+                    .is_err()
                 {
                     break 'check;
                 }

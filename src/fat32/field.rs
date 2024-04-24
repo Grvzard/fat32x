@@ -62,15 +62,11 @@ pub struct BytesField<const OFF: usize, const LEN: usize> {
 impl<const OFF: usize, const LEN: usize> Field for BytesField<OFF, LEN> {
     fn load(buf: &[u8]) -> Self {
         let mut value = [0u8; LEN];
-        for i in 0..LEN {
-            value[i] = buf[OFF + i];
-        }
+        value[..LEN].copy_from_slice(&buf[OFF..(OFF + LEN)]);
         BytesField::<OFF, LEN> { value }
     }
     fn dump(&self, buf: &mut [u8]) {
-        for i in 0..LEN {
-            buf[OFF + i] = self.value[i];
-        }
+        buf[OFF..(OFF + LEN)].copy_from_slice(&self.value[..LEN]);
     }
 }
 
