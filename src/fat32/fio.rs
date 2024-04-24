@@ -1,4 +1,4 @@
-use std::vec;
+use std::{time::SystemTime, vec};
 
 use super::spec::{BootSec, ClusNo, DirEnt, DirEntLfn, FatEnt};
 
@@ -203,6 +203,8 @@ pub struct File {
     // pub is_archive: bool,
     pub size: u32,
     pub fst_clus: u32,
+    pub crt_time: SystemTime,
+    pub wrt_time: SystemTime,
 }
 
 impl TryFrom<Vec<DirEnt>> for File {
@@ -270,6 +272,8 @@ impl TryFrom<Vec<DirEnt>> for File {
             is_system: sfn.is_system(),
             size: sfn.file_size.value,
             fst_clus: sfn.fst_clus(),
+            crt_time: sfn.crt_time(),
+            wrt_time: sfn.wrt_time(),
         })
     }
 }

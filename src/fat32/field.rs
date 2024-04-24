@@ -94,3 +94,54 @@ impl<const OFF: usize, const LEN: usize> Field for Utf16Field<OFF, LEN> {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct DateField<const OFF: usize> {
+    pub year: u8,
+    pub month: u8,
+    pub day: u8,
+}
+
+impl<const OFF: usize> Field for DateField<OFF> {
+    fn load(buf: &[u8]) -> Self {
+        let val = u16::from_le_bytes([buf[OFF], buf[OFF + 1]]);
+        let year = (val >> 9) as u8;
+        let month = (val >> 5 & 0xF) as u8;
+        let day = (val & 0x1F) as u8;
+        DateField { year, month, day }
+    }
+    fn dump(&self, buf: &mut [u8]) {
+        let val =
+            (self.year as u16) << 9 | ((self.month & 0xF) as u16) << 5 | (self.day & 0x1F) as u16;
+        buf[OFF] = val as u8;
+        buf[OFF + 1] = (val >> 8) as u8;
+    }
+}
+
+#[derive(Debug)]
+pub struct TimeField<const OFF: usize> {
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
+
+impl<const OFF: usize> Field for TimeField<OFF> {
+    fn load(buf: &[u8]) -> Self {
+        let val = u16::from_le_bytes([buf[OFF], buf[OFF + 1]]);
+        let hour = (val >> 11) as u8;
+        let minute = (val >> 5 & 0x3F) as u8;
+        let second = (val & 0x1F) as u8;
+        TimeField {
+            hour,
+            minute,
+            second,
+        }
+    }
+    fn dump(&self, buf: &mut [u8]) {
+        let val = (self.hour as u16) << 11
+            | ((self.minute & 0x3F) as u16) << 5
+            | (self.second & 0x1F) as u16;
+        buf[OFF] = val as u8;
+        buf[OFF + 1] = (val >> 8) as u8;
+    }
+}

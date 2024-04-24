@@ -34,10 +34,10 @@ impl From<fat32::fio::File> for FileAttr {
             ino: f.fst_clus.into(),
             size: f.size.into(),
             blocks: 0,
-            atime: UNIX_EPOCH,
-            mtime: UNIX_EPOCH,
-            ctime: UNIX_EPOCH,
-            crtime: UNIX_EPOCH,
+            atime: f.wrt_time, // `imprecise`
+            mtime: f.wrt_time,
+            ctime: f.crt_time, // `imprecise`
+            crtime: f.crt_time,
             kind: (&f).into(),
             perm: 0o755,
             nlink: 2,

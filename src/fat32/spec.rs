@@ -3,7 +3,13 @@
 // [2] http://elm-chan.org/docs/fat_e.html
 // [3] https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system#FAT
 
-use super::field::{BytesField, Field, U16Field, U32Field, U8Field, Utf16Field};
+use std::time::SystemTime;
+
+use chrono::{NaiveDateTime, TimeZone, Utc};
+
+use super::field::{
+    BytesField, DateField, Field, TimeField, U16Field, U32Field, U8Field, Utf16Field,
+};
 
 pub type ClusNo = u32;
 
@@ -142,14 +148,14 @@ impl FatEnt {
 pub struct DirEntSfn {
     name: BytesField<0, 11>,
     attr: U8Field<11>,
-    nt_res: U8Field<12>,         // `temporarily unused`
-    crt_time_tenth: U8Field<13>, // `temporarily unused`
-    crt_time: U16Field<14>,      // `temporarily unused`
-    crt_date: U16Field<16>,      // `temporarily unused`
-    lst_acc_date: U16Field<18>,  // `temporarily unused`
+    nt_res: U8Field<12>,
+    crt_time_tenth: U8Field<13>,
+    crt_time: TimeField<14>,
+    crt_date: DateField<16>,
+    lst_acc_date: U16Field<18>, // `temporarily unused`
     fst_clus_hi: U16Field<20>,
-    wrt_time: U16Field<22>, // `temporarily unused`
-    wrt_date: U16Field<24>, // `temporarily unused`
+    wrt_time: TimeField<22>,
+    wrt_date: DateField<24>,
     fst_clus_lo: U16Field<26>,
     pub file_size: U32Field<28>,
 }
@@ -244,6 +250,48 @@ impl DirEntSfn {
 
     pub fn is_archive(&self) -> bool {
         self.attr.value & DirEnt::ATTR_ARCHIVE != 0
+    }
+
+    fn make_dt<const T1: usize, const T2: usize>(
+        date: &DateField<T1>,
+        time: &TimeField<T2>,
+    ) -> Option<SystemTime> {
+        let naive_date = match chrono::NaiveDate::from_ymd_opt(
+            1980 + date.year as i32,
+            date.month.into(),
+            date.day.into(),
+        ) {
+            Some(date) => date,
+            None => return None,
+        };
+        let naive_time = match chrono::NaiveTime::from_hms_opt(
+            time.hour.into(),
+            time.minute.into(),
+            time.second.into(),
+        ) {
+            Some(time) => time,
+            None => return None,
+        };
+        let naive_dt = NaiveDateTime::new(naive_date, naive_time);
+        return Some(Utc.from_utc_datetime(&naive_dt).into());
+    }
+
+    pub fn wrt_time(&self) -> SystemTime {
+        if let Some(time) = Self::make_dt(&self.wrt_date, &self.wrt_time) {
+            time
+        } else {
+            SystemTime::UNIX_EPOCH
+        }
+    }
+
+    pub fn crt_time(&self) -> SystemTime {
+        if let Some(time) = Self::make_dt(&self.crt_date, &self.crt_time) {
+            let tenth_sec = self.crt_time_tenth.value / 100;
+            let tenth_milsec = self.crt_time_tenth.value % 100;
+            time + std::time::Duration::new(tenth_sec.into(), tenth_milsec as u32 * 1000_1000)
+        } else {
+            SystemTime::UNIX_EPOCH
+        }
     }
 }
 
