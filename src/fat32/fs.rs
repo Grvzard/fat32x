@@ -15,16 +15,16 @@ impl<'a> Fs<'a> {
     pub fn new(device: impl Device + 'a) -> Self {
         let fio = Fio::new(device);
         let mut dirmap = DirMap::new();
-        dirmap.insert(2, fio.readroot());
+        dirmap.insert(1, fio.readroot());
         Fs { fio, dirmap }
     }
 
-    pub fn readdir(&mut self, ino: u64) -> &Vec<File> {
-        if self.dirmap.get(&ino).is_none() {
-            let files = self.fio.read_dirents(ino as u32);
-            self.dirmap.insert(ino, files);
+    pub fn readdir(&mut self, id: u64) -> &Vec<File> {
+        if self.dirmap.get(&id).is_none() {
+            let files = self.fio.read_dirents(id as u32);
+            self.dirmap.insert(id, files);
         }
-        &self.dirmap[&ino]
+        &self.dirmap[&id]
     }
 
     pub fn lookup(&mut self, parent: u64, name: &str) -> Option<File> {

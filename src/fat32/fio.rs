@@ -78,6 +78,7 @@ impl Fat {
     }
 }
 
+#[derive(Clone)]
 struct FatIter<'a> {
     fat: &'a Fat,
     device: &'a dyn Device,
@@ -157,16 +158,18 @@ impl<'a> Fio<'a> {
     }
 
     pub fn read_dirents(&self, first_clusno: ClusNo) -> Vec<File> {
+        assert!(first_clusno >= 2);
         let mut res: Vec<File> = vec![];
+        let fat_iter = self.fat.new_iter(self.device.as_ref(), first_clusno);
         let clus_iter = ClusIter {
-            fat_iter: self.fat.new_iter(self.device.as_ref(), first_clusno),
+            fat_iter: fat_iter.clone(),
             device: self.device.as_ref(),
             clus_io: &self.clus_io,
         };
         let mut ents: Vec<DirEnt> = vec![];
-        for clus in clus_iter {
-            for buf in clus.chunks(DirEnt::SZ as usize) {
-                match DirEnt::new(buf) {
+        for (clus, clus_no) in clus_iter.zip(fat_iter) {
+            for (off, buf) in clus.chunks(DirEnt::SZ as usize).enumerate() {
+                match DirEnt::new(buf, clus_no, off as u32) {
                     dirent @ DirEnt::Lfn(_) => {
                         ents.push(dirent);
                     }
@@ -194,6 +197,7 @@ impl<'a> Fio<'a> {
 
 #[derive(Debug, Clone)]
 pub struct File {
+    pub id: u64, // a unique id consists of entry's clus_no and offset
     pub name: String,
     pub is_rdonly: bool,
     pub is_hidden: bool,
@@ -267,6 +271,7 @@ impl TryFrom<Vec<DirEnt>> for File {
             }
         }
         Ok(File {
+            id: (sfn.off as u64) << 32 | sfn.clus_no as u64,
             name,
             is_rdonly: sfn.is_rdonly(),
             is_dir: sfn.is_dir(),

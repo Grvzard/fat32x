@@ -11,7 +11,7 @@ use super::field::{
     BytesField, DateField, Field, TimeField, U16Field, U32Field, U8Field, Utf16Field,
 };
 
-pub type ClusNo = u32;
+pub type ClusNo = u32; // static
 
 pub struct BootSec {
     // > 0-35
@@ -158,6 +158,10 @@ pub struct DirEntSfn {
     wrt_date: DateField<24>,
     fst_clus_lo: U16Field<26>,
     pub file_size: U32Field<28>,
+
+    // the on-disk position (clus_no and offset) of this entry
+    pub clus_no: ClusNo,
+    pub off: u32,
 }
 
 #[allow(dead_code)]
@@ -354,7 +358,7 @@ impl DirEnt {
 
     pub const SZ: u32 = 32;
 
-    pub fn new(buf: &[u8]) -> Self {
+    pub fn new(buf: &[u8], clus_no: ClusNo, offset: u32) -> Self {
         let attr: U8Field<11> = Field::load(buf);
         if attr.value == Self::ATTR_LONG_FILE_NAME {
             DirEnt::Lfn(DirEntLfn {
@@ -381,6 +385,8 @@ impl DirEnt {
                 wrt_date: Field::load(buf),
                 fst_clus_lo: Field::load(buf),
                 file_size: Field::load(buf),
+                clus_no,
+                off: offset,
             })
         }
     }

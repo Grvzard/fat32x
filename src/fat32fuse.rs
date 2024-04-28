@@ -52,7 +52,7 @@ impl From<fat32::fio::File> for FileAttr {
 
 const TTL: Duration = Duration::from_secs(10);
 const ROOT_DIR_ATTR: FileAttr = FileAttr {
-    ino: 2,
+    ino: 1,
     size: 0,
     blocks: 0,
     atime: UNIX_EPOCH,
@@ -73,15 +73,12 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
     fn lookup(
         &mut self,
         _req: &Request<'_>,
-        mut parent: u64,
+        parent: u64,
         _name: &std::ffi::OsStr,
         reply: fuser::ReplyEntry,
     ) {
         let name = _name.to_string_lossy();
         println!("lookup `{name}` from `{parent}`");
-        if parent == 1 {
-            parent = 2;
-        }
 
         if let Some(file) = self.fs.lookup(parent, &name) {
             reply.entry(&TTL, &FileAttr::from(file), 0);
@@ -102,15 +99,11 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
     fn readdir(
         &mut self,
         _req: &fuser::Request<'_>,
-        mut ino: u64,
+        ino: u64,
         _fh: u64,
         _offset: i64,
         mut reply: fuser::ReplyDirectory,
     ) {
-        if ino == 1 {
-            ino = 2;
-        }
-
         println!("readdir ino: {ino}");
         for (i, f) in self
             .fs
