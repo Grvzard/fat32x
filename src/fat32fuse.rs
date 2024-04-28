@@ -28,17 +28,17 @@ impl From<&fat32::fio::Finfo> for FileType {
     }
 }
 
-impl From<fat32::fio::Finfo> for FileAttr {
-    fn from(f: fat32::fio::Finfo) -> Self {
+impl From<&fat32::fio::Finfo> for FileAttr {
+    fn from(f: &fat32::fio::Finfo) -> Self {
         FileAttr {
-            ino: f.fst_clus.into(),
+            ino: f.id,
             size: f.size.into(),
             blocks: 0,
             atime: f.wrt_time, // `imprecise`
             mtime: f.wrt_time,
             ctime: f.crt_time, // `imprecise`
             crtime: f.crt_time,
-            kind: (&f).into(),
+            kind: f.into(),
             perm: 0o755,
             nlink: 2,
             uid: 501,
@@ -81,7 +81,8 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
         println!("lookup `{name}` from `{parent}`");
 
         if let Some(file) = self.fs.lookup(parent, &name) {
-            reply.entry(&TTL, &FileAttr::from(file), 0);
+            println!("lookup done: {}.", file.id);
+            reply.entry(&TTL, &FileAttr::from(file.as_ref()), 0);
         } else {
             reply.error(ENOENT);
         }
@@ -91,6 +92,9 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
         println!("getattr ino: {ino}");
         if ino == 1 {
             reply.attr(&TTL, &ROOT_DIR_ATTR)
+        } else if let Some(fi) = self.fs.getinfo(ino) {
+            println!("{:?}", fi);
+            reply.attr(&TTL, &fi.as_ref().into())
         } else {
             reply.error(ENOENT);
         }
@@ -112,8 +116,7 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
             .enumerate()
             .skip(_offset as usize)
         {
-            println!("{:?}", f);
-            if reply.add(f.fst_clus.into(), (i + 1) as i64, f.into(), f.name.clone()) {
+            if reply.add(f.id, (i + 1) as i64, f.as_ref().into(), f.name.clone()) {
                 println!("readdir: break;");
                 break;
             }

@@ -158,7 +158,11 @@ impl<'a> Fio<'a> {
     }
 
     pub fn read_dirents(&self, first_clusno: ClusNo) -> Vec<Finfo> {
-        assert!(first_clusno >= 2);
+        if first_clusno == 0 {
+            // a empty dir entry has first_clusno set to 0
+            return vec![];
+        }
+        assert!(first_clusno != 1);
         let mut res: Vec<Finfo> = vec![];
         let fat_iter = self.fat.new_iter(self.device.as_ref(), first_clusno);
         let clus_iter = ClusIter {
