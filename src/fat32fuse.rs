@@ -18,8 +18,8 @@ impl<'a> Fat32Fuse<'a> {
     }
 }
 
-impl From<&fat32::fio::File> for FileType {
-    fn from(f: &fat32::fio::File) -> Self {
+impl From<&fat32::fio::Finfo> for FileType {
+    fn from(f: &fat32::fio::Finfo) -> Self {
         if f.is_dir {
             Self::Directory
         } else {
@@ -28,8 +28,8 @@ impl From<&fat32::fio::File> for FileType {
     }
 }
 
-impl From<fat32::fio::File> for FileAttr {
-    fn from(f: fat32::fio::File) -> Self {
+impl From<fat32::fio::Finfo> for FileAttr {
+    fn from(f: fat32::fio::Finfo) -> Self {
         FileAttr {
             ino: f.fst_clus.into(),
             size: f.size.into(),

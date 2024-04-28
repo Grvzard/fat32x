@@ -157,9 +157,9 @@ impl<'a> Fio<'a> {
         }
     }
 
-    pub fn read_dirents(&self, first_clusno: ClusNo) -> Vec<File> {
+    pub fn read_dirents(&self, first_clusno: ClusNo) -> Vec<Finfo> {
         assert!(first_clusno >= 2);
-        let mut res: Vec<File> = vec![];
+        let mut res: Vec<Finfo> = vec![];
         let fat_iter = self.fat.new_iter(self.device.as_ref(), first_clusno);
         let clus_iter = ClusIter {
             fat_iter: fat_iter.clone(),
@@ -179,7 +179,7 @@ impl<'a> Fio<'a> {
                             break;
                         }
                         ents.push(DirEnt::Sfn(en));
-                        if let Ok(file) = File::try_from(ents) {
+                        if let Ok(file) = Finfo::try_from(ents) {
                             res.push(file)
                         };
                         ents = vec![];
@@ -190,13 +190,13 @@ impl<'a> Fio<'a> {
         res
     }
 
-    pub fn readroot(&self) -> Vec<File> {
+    pub fn readroot(&self) -> Vec<Finfo> {
         self.read_dirents(self.root_clusno)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct File {
+pub struct Finfo {
     pub id: u64, // a unique id consists of entry's clus_no and offset
     pub name: String,
     pub is_rdonly: bool,
@@ -210,13 +210,13 @@ pub struct File {
     pub wrt_time: SystemTime,
 }
 
-impl TryFrom<Vec<DirEnt>> for File {
+impl TryFrom<Vec<DirEnt>> for Finfo {
     type Error = FsError;
     fn try_from(mut ents: Vec<DirEnt>) -> Result<Self, Self::Error> {
         // consume the sfn
         let sfn = match ents.pop() {
             Some(DirEnt::Sfn(en)) => en,
-            _ => panic!("fs::File: try_from"),
+            _ => panic!("fs::Finfo: try_from"),
         };
         if sfn.is_unused() || sfn.is_volumeid() {
             return Err(FsError::DirEntReductionFailure);
@@ -232,7 +232,7 @@ impl TryFrom<Vec<DirEnt>> for File {
                 .iter()
                 .map(|dirent| match dirent {
                     DirEnt::Lfn(en) => en,
-                    _ => panic!("fs::File: try_from"),
+                    _ => panic!("fs::Finfo: try_from"),
                 })
                 .collect();
 
@@ -270,7 +270,7 @@ impl TryFrom<Vec<DirEnt>> for File {
                 name = longname;
             }
         }
-        Ok(File {
+        Ok(Finfo {
             id: (sfn.off as u64) << 32 | sfn.clus_no as u64,
             name,
             is_rdonly: sfn.is_rdonly(),
