@@ -1,6 +1,6 @@
 use std::time::{Duration, UNIX_EPOCH};
 
-use fuser::{FileAttr, FileType, Filesystem, ReplyAttr, Request};
+use fuser::{FileAttr, FileType, Filesystem, ReplyAttr, ReplyOpen, Request};
 use libc::ENOENT;
 
 use crate::fat32;
@@ -78,10 +78,9 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
         reply: fuser::ReplyEntry,
     ) {
         let name = _name.to_string_lossy();
-        println!("lookup `{name}` from `{parent}`");
+        // println!("lookup `{name}` from `{parent}`");
 
         if let Some(file) = self.fs.lookup(parent, &name) {
-            println!("lookup done: {}.", file.id);
             reply.entry(&TTL, &FileAttr::from(file.as_ref()), 0);
         } else {
             reply.error(ENOENT);
@@ -89,11 +88,11 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        println!("getattr ino: {ino}");
+        // println!("getattr ino: {ino}");
         if ino == 1 {
             reply.attr(&TTL, &ROOT_DIR_ATTR)
         } else if let Some(fi) = self.fs.getinfo(ino) {
-            println!("{:?}", fi);
+            // println!("{:?}", fi);
             reply.attr(&TTL, &fi.as_ref().into())
         } else {
             reply.error(ENOENT);
@@ -122,5 +121,45 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
             }
         }
         reply.ok()
+    }
+
+    fn open(&mut self, _req: &Request<'_>, ino: u64, _flags: i32, reply: ReplyOpen) {
+        if self.fs.open(ino) {
+            reply.opened(0, 0);
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+
+    fn release(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        _fh: u64,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        _flush: bool,
+        reply: fuser::ReplyEmpty,
+    ) {
+        self.fs.close(ino);
+        reply.ok();
+    }
+
+    fn read(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        size: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: fuser::ReplyData,
+    ) {
+        if let Some(bytes) = self.fs.read(ino, offset as u32, size) {
+            reply.data(&bytes);
+        } else {
+            reply.error(ENOENT);
+        }
     }
 }

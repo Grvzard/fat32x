@@ -1,4 +1,4 @@
-use std::{time::SystemTime, vec};
+use std::{cmp::min, time::SystemTime, vec};
 
 use super::spec::{BootSec, ClusNo, DirEnt, DirEntLfn, FatEnt};
 
@@ -101,7 +101,7 @@ impl<'a> Iterator for FatIter<'a> {
 }
 
 struct ClusIter<'a> {
-    fat_iter: FatIter<'a>,
+    fat_iter: &'a mut dyn Iterator<Item = ClusNo>,
     device: &'a dyn Device,
     clus_io: &'a ClusIo,
 }
@@ -123,6 +123,7 @@ pub struct Fio<'a> {
     fat: Fat,
     clus_io: ClusIo,
     pub root_clusno: ClusNo,
+    clus_sz: u32,
 }
 
 #[allow(dead_code)]
@@ -154,6 +155,7 @@ impl<'a> Fio<'a> {
             fat: fat_1,
             clus_io,
             root_clusno: sec0.bpb_root_clus.value,
+            clus_sz: sec0.cluster_size(),
         }
     }
 
@@ -166,7 +168,7 @@ impl<'a> Fio<'a> {
         let mut res: Vec<Finfo> = vec![];
         let fat_iter = self.fat.new_iter(self.device.as_ref(), first_clusno);
         let clus_iter = ClusIter {
-            fat_iter: fat_iter.clone(),
+            fat_iter: &mut fat_iter.clone(),
             device: self.device.as_ref(),
             clus_io: &self.clus_io,
         };
@@ -196,6 +198,33 @@ impl<'a> Fio<'a> {
 
     pub fn readroot(&self) -> Vec<Finfo> {
         self.read_dirents(self.root_clusno)
+    }
+
+    pub fn readfile(&self, fi: &Finfo, offset: u32, size: u32) -> Vec<u8> {
+        if offset >= fi.size || size == 0 {
+            return vec![];
+        }
+        let sz = min(size, fi.size - offset);
+        let start_clus = offset / self.clus_sz;
+        let start_off = (offset % self.clus_sz) as usize;
+        let end_clus = (offset + sz - 1) / self.clus_sz;
+
+        let clus_iter = ClusIter {
+            fat_iter: &mut self
+                .fat
+                .new_iter(self.device.as_ref(), fi.fst_clus)
+                .skip(start_clus as usize)
+                .take((end_clus - start_clus + 1) as usize),
+            device: self.device.as_ref(),
+            clus_io: &self.clus_io,
+        };
+        let bytes: Vec<u8> = clus_iter.flatten().collect();
+        println!(
+            "[fio] readfile: file({}) off({offset}) size({sz}) got({})",
+            fi.name,
+            bytes.len()
+        );
+        bytes[start_off..(start_off + sz as usize)].to_vec()
     }
 }
 

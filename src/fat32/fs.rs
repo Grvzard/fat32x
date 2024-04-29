@@ -11,6 +11,7 @@ pub struct Fs<'a> {
     fio: Fio<'a>,
     dirmap: DirMap,
     fmap: FinfoMap,
+    filesopen: BTreeMap<u64, u32>,
 }
 
 // #[allow(dead_code)]
@@ -19,7 +20,12 @@ impl<'a> Fs<'a> {
         let fio = Fio::new(device);
         let dirmap = DirMap::new();
         let fmap = FinfoMap::new();
-        let mut fs = Fs { fio, dirmap, fmap };
+        let mut fs = Fs {
+            fio,
+            dirmap,
+            fmap,
+            filesopen: BTreeMap::new(),
+        };
         let rootfiles: Vec<Rc<Finfo>> = fs
             .fio
             .read_dirents(fs.fio.root_clusno)
@@ -69,5 +75,33 @@ impl<'a> Fs<'a> {
 
     pub fn getinfo(&mut self, id: u64) -> Option<Rc<Finfo>> {
         self.fmap.get(&id).cloned()
+    }
+
+    pub fn open(&mut self, id: u64) -> bool {
+        if let Some(_fi) = self.getinfo(id) {
+            println!("open: {:?}", _fi.name);
+            self.filesopen
+                .entry(id)
+                .and_modify(|cnt| *cnt += 1)
+                .or_insert(1);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn close(&mut self, id: u64) {
+        if let Some(cnt) = self.filesopen.get_mut(&id) {
+            *cnt -= 1;
+            if *cnt == 0 {
+                self.filesopen.remove(&id);
+            }
+        }
+    }
+
+    pub fn read(&mut self, id: u64, offset: u32, size: u32) -> Option<Vec<u8>> {
+        self.fmap
+            .get(&id)
+            .map(|fi| self.fio.readfile(fi, offset, size))
     }
 }
