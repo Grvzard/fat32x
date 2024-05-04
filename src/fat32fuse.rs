@@ -162,4 +162,25 @@ impl<'a> Filesystem for Fat32Fuse<'a> {
             reply.error(ENOENT);
         }
     }
+
+    fn opendir(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
+        if let Some(fi) = self.fs.getinfo(_ino) {
+            println!("[fuse] open dir: {}", fi.name);
+        }
+        reply.opened(0, 0);
+    }
+
+    fn releasedir(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        _fh: u64,
+        _flags: i32,
+        reply: fuser::ReplyEmpty,
+    ) {
+        if let Some(fi) = self.fs.getinfo(_ino) {
+            println!("[fuse] close dir: {}", fi.name);
+        }
+        reply.ok();
+    }
 }

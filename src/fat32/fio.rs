@@ -21,14 +21,14 @@ type Sec = [u8; SEC_SZ];
 type Clus = Vec<u8>;
 
 struct SecIo {
-    start: u64, // sec number
-    from: u64,
+    base: u64, // sec number
+    skip: u64, // secs
 }
 
 impl SecIo {
     fn read(&self, sec_no: u64, device: &dyn Device) -> Sec {
         let mut buf: Sec = [0u8; SEC_SZ];
-        device.read_exact_at(&mut buf, (self.start + self.from + sec_no) * SEC_SZ as u64);
+        device.read_exact_at(&mut buf, (self.base + self.skip + sec_no) * SEC_SZ as u64);
         buf
     }
 }
@@ -145,8 +145,8 @@ impl<'a> Fio<'a> {
         };
         let fat_1 = Fat {
             sec_io: SecIo {
-                start: sec0.fat_start_sector().into(),
-                from: sec0.bpb_fat_sz_32.into(),
+                base: sec0.fat_start_sector().into(),
+                skip: sec0.bpb_fat_sz_32.into(),
             },
             entries_per_sec: sec0.bpb_byts_per_sec as u64 / Fat::ENT_SZ as u64,
         };
