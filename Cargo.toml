@@ -11,4 +11,4 @@ fuser = "0.14"
 libc = "0.2"
 clap = { version = "4.5.4", features = ["derive"] }
 chrono = "0.4.38"
-# rusb = "0.9"
+scroll = "0.12"

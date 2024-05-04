@@ -132,29 +132,29 @@ impl<'a> Fio<'a> {
         let mut buf: Sec = [0u8; SEC_SZ];
         device.read_exact_at(&mut buf, 0);
 
-        let sec0 = BootSec::new(&mut buf);
+        let sec0 = BootSec::new(&mut buf).unwrap();
         sec0.check_fat32();
         // temporarily only support sector size 512
-        assert!(sec0.bpb_byts_per_sec.value as usize == SEC_SZ);
-        assert!(sec0.bpb_num_fats.value == 2);
+        assert!(sec0.bpb_byts_per_sec as usize == SEC_SZ);
+        assert!(sec0.bpb_num_fats == 2);
 
         let clus_io = ClusIo {
-            start: sec0.data_start_sector() as u64 * sec0.bpb_byts_per_sec.value as u64,
+            start: sec0.data_start_sector() as u64 * sec0.bpb_byts_per_sec as u64,
             skip: 0,
             clus_sz: sec0.cluster_size(),
         };
         let fat_1 = Fat {
             sec_io: SecIo {
                 start: sec0.fat_start_sector().into(),
-                from: sec0.bpb_fat_sz_32.value.into(),
+                from: sec0.bpb_fat_sz_32.into(),
             },
-            entries_per_sec: sec0.bpb_byts_per_sec.value as u64 / Fat::ENT_SZ as u64,
+            entries_per_sec: sec0.bpb_byts_per_sec as u64 / Fat::ENT_SZ as u64,
         };
         Fio {
             device: Box::new(device),
             fat: fat_1,
             clus_io,
-            root_clusno: sec0.bpb_root_clus.value,
+            root_clusno: sec0.bpb_root_clus,
             clus_sz: sec0.cluster_size(),
         }
     }
@@ -176,10 +176,10 @@ impl<'a> Fio<'a> {
         for (clus, clus_no) in clus_iter.zip(fat_iter) {
             for (off, buf) in clus.chunks(DirEnt::SZ as usize).enumerate() {
                 match DirEnt::new(buf, clus_no, off as u32) {
-                    dirent @ DirEnt::Lfn(_) => {
+                    Ok(dirent @ DirEnt::Lfn(_)) => {
                         ents.push(dirent);
                     }
-                    DirEnt::Sfn(en) => {
+                    Ok(DirEnt::Sfn(en)) => {
                         if en.is_end() {
                             ents.clear();
                             break;
@@ -190,6 +190,7 @@ impl<'a> Fio<'a> {
                         };
                         ents = vec![];
                     }
+                    Err(_) => panic!("[fio] read_dirents: failed."),
                 };
             }
         }
@@ -280,7 +281,7 @@ impl TryFrom<Vec<DirEnt>> for Finfo {
                 let mut longname = String::new();
                 // checksum and build name
                 for &en in lfns.iter() {
-                    if en.chksum.value != chksum {
+                    if en.chksum != chksum {
                         break 'check;
                     }
                     longname.insert_str(0, &en.name());
@@ -310,7 +311,7 @@ impl TryFrom<Vec<DirEnt>> for Finfo {
             is_dir: sfn.is_dir(),
             is_hidden: sfn.is_hidden(),
             is_system: sfn.is_system(),
-            size: sfn.file_size.value,
+            size: sfn.file_size,
             fst_clus: sfn.fst_clus(),
             crt_time: sfn.crt_time(),
             wrt_time: sfn.wrt_time(),
