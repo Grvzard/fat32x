@@ -104,10 +104,15 @@ impl BootSec {
     }
 
     pub fn check_fat32(&self) {
-        assert_eq!(self.bs_boot_sign, 0xAA55);
+        assert!(self.bs_boot_sign == 0xAA55);
 
+        assert!(self.bpb_sec_per_clus != 0);
         let num_clusters = self.data_sectors() / self.bpb_sec_per_clus as u32;
         assert!(num_clusters >= 65526);
+
+        // temporarily only support sector size 512
+        assert!(self.bpb_byts_per_sec as usize == 512);
+        assert!(self.bpb_num_fats == 2);
     }
 }
 

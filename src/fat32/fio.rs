@@ -135,9 +135,6 @@ impl<'a> Fio<'a> {
 
         let bootsec = BootSec::new(&mut buf).unwrap();
         bootsec.check_fat32();
-        // temporarily only support sector size 512
-        assert!(bootsec.bpb_byts_per_sec as usize == SEC_SZ);
-        assert!(bootsec.bpb_num_fats == 2);
 
         let clus_io = ClusIo {
             start: bootsec.data_start_sector() as u64 * bootsec.bpb_byts_per_sec as u64,

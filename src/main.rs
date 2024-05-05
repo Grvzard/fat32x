@@ -1,5 +1,8 @@
+mod exfat;
 mod fat32;
 mod fat32fuse;
+
+use std::fs::File;
 
 use clap::{Parser, Subcommand};
 use fuser::MountOption;
@@ -31,6 +34,11 @@ enum Commands {
         )]
         read_clus: u32,
     },
+    Exfat {
+        device: String,
+        #[arg(short, long, group = "instr")]
+        info: bool,
+    },
 }
 
 fn main() {
@@ -46,7 +54,7 @@ fn main() {
                 MountOption::AutoUnmount,
                 MountOption::RO,
             ];
-            match fuser::mount2(fat32fuse::Fat32Fuse::new(&device), mount_point, &opts) {
+            match fuser::mount2(fat32fuse::Fat32Fuse::new(device), mount_point, &opts) {
                 Ok(()) => (),
                 Err(e) => {
                     println!("{}", e);
@@ -66,6 +74,13 @@ fn main() {
                 for byte in clus {
                     print!("{}", byte as char);
                 }
+            }
+        }
+        Commands::Exfat { device, info } => {
+            let file = File::open(device).expect("device can't be opened");
+            let fio = exfat::Fio::new(file);
+            if *info {
+                println!("{:?}", fio.bootsec)
             }
         }
     }
