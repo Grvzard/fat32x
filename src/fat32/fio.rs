@@ -1,6 +1,7 @@
-use std::{cmp::min, time::SystemTime, vec};
+use std::{cmp::min, io::SeekFrom, time::SystemTime, vec};
 
 use super::spec::{BootSec, ClusNo, DirEnt, DirEntLfn, FatEnt};
+use crate::device::Device;
 
 #[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
@@ -12,11 +13,6 @@ pub enum FsError {
 }
 
 const SEC_SZ: usize = 512;
-
-pub trait Device {
-    fn read_exact_at(&self, buf: &mut [u8], offset: u64);
-}
-
 type Sec = [u8; SEC_SZ];
 type Clus = Vec<u8>;
 
@@ -26,9 +22,14 @@ struct SecIo {
 }
 
 impl SecIo {
-    fn read(&self, sec_no: u64, device: &dyn Device) -> Sec {
+    fn read(&self, sec_no: u64, device: &mut dyn Device) -> Sec {
         let mut buf: Sec = [0u8; SEC_SZ];
-        device.read_exact_at(&mut buf, (self.base + self.skip + sec_no) * SEC_SZ as u64);
+        device
+            .seek(SeekFrom::Start(
+                (self.base + self.skip + sec_no) * SEC_SZ as u64,
+            ))
+            .unwrap();
+        device.read_exact(&mut buf).unwrap();
         buf
     }
 }
@@ -40,13 +41,21 @@ struct ClusIo {
 }
 
 impl ClusIo {
-    fn read(&self, clus_no: u32, device: &dyn Device) -> Clus {
+    fn read(&self, clus_no: u32, device: &mut dyn Device) -> Clus {
         let mut buf = vec![0u8; self.clus_sz as usize];
-        device.read_exact_at(
-            &mut buf,
-            self.start + (self.skip + clus_no - 2) as u64 * self.clus_sz as u64,
-        );
+        device
+            .seek(SeekFrom::Start(
+                self.start + (self.skip + clus_no - 2) as u64 * self.clus_sz as u64,
+            ))
+            .unwrap();
+        device.read_exact(&mut buf).unwrap();
         buf
+    }
+
+    fn read_all(&self, fats: Vec<ClusNo>, device: &mut dyn Device) -> Vec<Clus> {
+        fats.into_iter()
+            .map(|clusno| self.read(clusno, device))
+            .collect()
     }
 }
 
@@ -55,17 +64,20 @@ struct Fat {
     entries_per_sec: u64,
 }
 
-#[allow(dead_code)]
 impl Fat {
     const ENT_SZ: usize = 4;
-    fn read_one(&self, no: u64, device: &dyn Device) -> FatEnt {
+    fn read_one(&self, no: u64, device: &mut dyn Device) -> FatEnt {
         let sec_no = no / self.entries_per_sec;
         let ent_offset = (no % self.entries_per_sec) as usize;
         let sec = self.sec_io.read(sec_no, device);
         FatEnt::new(&sec[Fat::ENT_SZ * ent_offset..Fat::ENT_SZ * (ent_offset + 1)])
     }
 
-    fn new_iter<'a>(&'a self, device: &'a dyn Device, first_clusno: ClusNo) -> FatIter {
+    fn read_all(&self, device: &mut dyn Device, first_clusno: ClusNo) -> Vec<ClusNo> {
+        self.new_iter(device, first_clusno).collect()
+    }
+
+    fn new_iter<'a>(&'a self, device: &'a mut dyn Device, first_clusno: ClusNo) -> FatIter {
         match self.read_one(first_clusno.into(), device) {
             FatEnt::Eoc | FatEnt::Next(_) => (),
             en => panic!("fs err: trying to iterate a {:#?} Fat entry", en),
@@ -78,10 +90,9 @@ impl Fat {
     }
 }
 
-#[derive(Clone)]
 struct FatIter<'a> {
     fat: &'a Fat,
-    device: &'a dyn Device,
+    device: &'a mut dyn Device,
     next_clusno: Option<ClusNo>,
 }
 
@@ -100,23 +111,6 @@ impl<'a> Iterator for FatIter<'a> {
     }
 }
 
-struct ClusIter<'a> {
-    fat_iter: &'a mut dyn Iterator<Item = ClusNo>,
-    device: &'a dyn Device,
-    clus_io: &'a ClusIo,
-}
-
-impl<'a> Iterator for ClusIter<'a> {
-    type Item = Clus;
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(clusno) = self.fat_iter.next() {
-            Some(self.clus_io.read(clusno, self.device))
-        } else {
-            None
-        }
-    }
-}
-
 #[allow(dead_code)]
 pub struct Fio<'a> {
     device: Box<(dyn Device + 'a)>,
@@ -129,9 +123,10 @@ pub struct Fio<'a> {
 
 #[allow(dead_code)]
 impl<'a> Fio<'a> {
-    pub fn new(device: impl Device + 'a) -> Self {
+    pub fn new(mut device: impl Device + 'a) -> Self {
         let mut buf: Sec = [0u8; SEC_SZ];
-        device.read_exact_at(&mut buf, 0);
+        device.seek(SeekFrom::Start(0)).unwrap();
+        device.read_exact(&mut buf).unwrap();
 
         let bootsec = BootSec::new(&mut buf).unwrap();
         bootsec.check_fat32();
@@ -158,25 +153,22 @@ impl<'a> Fio<'a> {
         }
     }
 
-    pub fn read_clus(&self, clusno: ClusNo) -> Clus {
-        self.clus_io.read(clusno, self.device.as_ref())
+    pub fn read_clus(&mut self, clusno: ClusNo) -> Clus {
+        self.clus_io.read(clusno, self.device.as_mut())
     }
 
-    pub fn read_dirents(&self, first_clusno: ClusNo) -> Vec<Finfo> {
+    pub fn read_dirents(&mut self, first_clusno: ClusNo) -> Vec<Finfo> {
         if first_clusno == 0 {
             // a empty dir entry has first_clusno set to 0
             return vec![];
         }
         assert!(first_clusno != 1);
         let mut res: Vec<Finfo> = vec![];
-        let fat_iter = self.fat.new_iter(self.device.as_ref(), first_clusno);
-        let clus_iter = ClusIter {
-            fat_iter: &mut fat_iter.clone(),
-            device: self.device.as_ref(),
-            clus_io: &self.clus_io,
-        };
+        let fats = self.fat.read_all(self.device.as_mut(), first_clusno);
+        // let mut fat_iter = self.fat.new_iter(self.device.as_mut(), first_clusno);
         let mut ents: Vec<DirEnt> = vec![];
-        for (clus, clus_no) in clus_iter.zip(fat_iter) {
+        for clus_no in fats.into_iter() {
+            let clus = self.clus_io.read(clus_no, self.device.as_mut());
             for (off, buf) in clus.chunks(DirEnt::SZ as usize).enumerate() {
                 match DirEnt::new(buf, clus_no, off as u32) {
                     Ok(dirent @ DirEnt::Lfn(_)) => {
@@ -200,11 +192,11 @@ impl<'a> Fio<'a> {
         res
     }
 
-    pub fn readroot(&self) -> Vec<Finfo> {
+    pub fn readroot(&mut self) -> Vec<Finfo> {
         self.read_dirents(self.root_clusno)
     }
 
-    pub fn readfile(&self, fi: &Finfo, offset: u32, size: u32) -> Vec<u8> {
+    pub fn readfile(&mut self, fi: &Finfo, offset: u32, size: u32) -> Vec<u8> {
         if offset >= fi.size || size == 0 {
             return vec![];
         }
@@ -213,16 +205,14 @@ impl<'a> Fio<'a> {
         let start_off = (offset % self.clus_sz) as usize;
         let end_clus = (offset + sz - 1) / self.clus_sz;
 
-        let clus_iter = ClusIter {
-            fat_iter: &mut self
-                .fat
-                .new_iter(self.device.as_ref(), fi.fst_clus)
-                .skip(start_clus as usize)
-                .take((end_clus - start_clus + 1) as usize),
-            device: self.device.as_ref(),
-            clus_io: &self.clus_io,
-        };
-        let bytes: Vec<u8> = clus_iter.flatten().collect();
+        let fats: Vec<ClusNo> = self
+            .fat
+            .new_iter(self.device.as_mut(), fi.fst_clus)
+            .skip(start_clus as usize)
+            .take((end_clus - start_clus + 1) as usize)
+            .collect();
+
+        let bytes: Vec<u8> = self.clus_io.read_all(fats, self.device.as_mut()).concat();
         println!(
             "[fio] readfile: file({}) off({offset}) size({sz}) got({})",
             fi.name,

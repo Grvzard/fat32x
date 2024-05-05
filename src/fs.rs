@@ -1,7 +1,8 @@
 use core::panic;
 use std::{collections::BTreeMap, rc::Rc, vec};
 
-use super::fio::{Device, Finfo, Fio};
+use crate::device::Device;
+use crate::fat32::fio::{Finfo, Fio};
 
 type DirMap = BTreeMap<u64, Vec<Rc<Finfo>>>;
 type FinfoMap = BTreeMap<u64, Rc<Finfo>>;

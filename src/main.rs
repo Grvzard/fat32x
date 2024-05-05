@@ -1,6 +1,8 @@
+mod device;
 mod exfat;
 mod fat32;
 mod fat32fuse;
+mod fs;
 
 use std::fs::File;
 
@@ -66,7 +68,7 @@ fn main() {
             info,
             read_clus,
         } => {
-            let fio = fat32::fio::Fio::new(fat32::impls::BlkDevice::new(device));
+            let mut fio = fat32::fio::Fio::new(File::open(device).unwrap());
             if *info {
                 println!("{:?}", fio.bootsec)
             } else if *read_clus != 0 {

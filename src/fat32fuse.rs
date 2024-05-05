@@ -1,25 +1,27 @@
+use std::fs::File;
 use std::time::{Duration, UNIX_EPOCH};
 
 use fuser::{FileAttr, FileType, Filesystem, ReplyAttr, ReplyOpen, Request};
 use libc::ENOENT;
 
-use crate::fat32;
+use crate::fat32::fio;
+use crate::fs;
 
 pub struct Fat32Fuse<'a> {
-    fs: fat32::fs::Fs<'a>,
+    fs: fs::Fs<'a>,
 }
 
 impl<'a> Fat32Fuse<'a> {
     pub fn new(devname: &str) -> Self {
-        let device = fat32::impls::BlkDevice::new(devname);
+        let device = File::open(devname).unwrap();
         Fat32Fuse {
-            fs: fat32::fs::Fs::new(device),
+            fs: fs::Fs::new(device),
         }
     }
 }
 
-impl From<&fat32::fio::Finfo> for FileType {
-    fn from(f: &fat32::fio::Finfo) -> Self {
+impl From<&fio::Finfo> for FileType {
+    fn from(f: &fio::Finfo) -> Self {
         if f.is_dir {
             Self::Directory
         } else {
@@ -28,8 +30,8 @@ impl From<&fat32::fio::Finfo> for FileType {
     }
 }
 
-impl From<&fat32::fio::Finfo> for FileAttr {
-    fn from(f: &fat32::fio::Finfo) -> Self {
+impl From<&fio::Finfo> for FileAttr {
+    fn from(f: &fio::Finfo) -> Self {
         FileAttr {
             ino: f.id,
             size: f.size.into(),
