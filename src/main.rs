@@ -4,7 +4,7 @@ mod fat32;
 mod fat32fuse;
 mod fs;
 
-use std::fs::File;
+use std::{fs::File, io::Write};
 
 use clap::{Parser, Subcommand};
 use fuser::MountOption;
@@ -73,9 +73,7 @@ fn main() {
                 println!("{:?}", fio.bootsec)
             } else if *read_clus != 0 {
                 let clus = fio.read_clus(*read_clus);
-                for byte in clus {
-                    print!("{}", byte as char);
-                }
+                std::io::stdout().write_all(&clus).unwrap();
             }
         }
         Commands::Exfat { device, info } => {
