@@ -124,6 +124,7 @@ pub struct Fio<'a> {
     clus_io: ClusIo,
     pub root_clusno: ClusNo,
     clus_sz: u32,
+    pub bootsec: BootSec,
 }
 
 #[allow(dead_code)]
@@ -132,31 +133,36 @@ impl<'a> Fio<'a> {
         let mut buf: Sec = [0u8; SEC_SZ];
         device.read_exact_at(&mut buf, 0);
 
-        let sec0 = BootSec::new(&mut buf).unwrap();
-        sec0.check_fat32();
+        let bootsec = BootSec::new(&mut buf).unwrap();
+        bootsec.check_fat32();
         // temporarily only support sector size 512
-        assert!(sec0.bpb_byts_per_sec as usize == SEC_SZ);
-        assert!(sec0.bpb_num_fats == 2);
+        assert!(bootsec.bpb_byts_per_sec as usize == SEC_SZ);
+        assert!(bootsec.bpb_num_fats == 2);
 
         let clus_io = ClusIo {
-            start: sec0.data_start_sector() as u64 * sec0.bpb_byts_per_sec as u64,
+            start: bootsec.data_start_sector() as u64 * bootsec.bpb_byts_per_sec as u64,
             skip: 0,
-            clus_sz: sec0.cluster_size(),
+            clus_sz: bootsec.cluster_size(),
         };
         let fat_1 = Fat {
             sec_io: SecIo {
-                base: sec0.fat_start_sector().into(),
-                skip: sec0.bpb_fat_sz_32.into(),
+                base: bootsec.fat_start_sector().into(),
+                skip: bootsec.bpb_fat_sz_32.into(),
             },
-            entries_per_sec: sec0.bpb_byts_per_sec as u64 / Fat::ENT_SZ as u64,
+            entries_per_sec: bootsec.bpb_byts_per_sec as u64 / Fat::ENT_SZ as u64,
         };
         Fio {
             device: Box::new(device),
             fat: fat_1,
             clus_io,
-            root_clusno: sec0.bpb_root_clus,
-            clus_sz: sec0.cluster_size(),
+            root_clusno: bootsec.bpb_root_clus,
+            clus_sz: bootsec.cluster_size(),
+            bootsec,
         }
+    }
+
+    pub fn read_clus(&self, clusno: ClusNo) -> Clus {
+        self.clus_io.read(clusno, self.device.as_ref())
     }
 
     pub fn read_dirents(&self, first_clusno: ClusNo) -> Vec<Finfo> {

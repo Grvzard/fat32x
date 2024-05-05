@@ -10,6 +10,7 @@ use scroll::{self, Pread, LE};
 
 pub type ClusNo = u32; // static
 
+#[derive(Debug)]
 pub struct BootSec {
     // > 0-35
     // BS_JmpBoot
