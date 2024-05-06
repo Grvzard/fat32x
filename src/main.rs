@@ -40,6 +40,16 @@ enum Commands {
         device: String,
         #[arg(short, long, group = "instr")]
         info: bool,
+        #[arg(
+            short,
+            long,
+            group = "instr",
+            default_value_t = 0,
+            value_name = "ClusNo"
+        )]
+        read_clus: u32,
+        #[arg(long, group = "instr", default_value_t = 0, value_name = "ClusNo")]
+        read_dirents: u32,
     },
 }
 
@@ -76,11 +86,30 @@ fn main() {
                 std::io::stdout().write_all(&clus).unwrap();
             }
         }
-        Commands::Exfat { device, info } => {
+        Commands::Exfat {
+            device,
+            info,
+            read_clus,
+            read_dirents,
+        } => {
             let file = File::open(device).expect("device can't be opened");
-            let fio = exfat::Fio::new(file);
+            let mut fio = exfat::Fio::new(file);
             if *info {
                 println!("{:?}", fio.bootsec)
+            } else if *read_clus != 0 {
+                let clus = fio.read_clus(*read_clus);
+                std::io::stdout().write_all(&clus).unwrap();
+            } else if *read_dirents != 0 {
+                let mut ents = fio.read_dirents(*read_dirents);
+                // remove trailing entries of Unused
+                while let Some(last) = ents.last() {
+                    if let exfat::spec::dirent::DirEnt::Unused = last {
+                        ents.pop();
+                    } else {
+                        break;
+                    }
+                }
+                println!("{:#?}", ents);
             }
         }
     }
