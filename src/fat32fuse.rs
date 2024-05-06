@@ -36,7 +36,7 @@ impl From<&fio::Finfo> for FileAttr {
             ino: f.id,
             size: f.size.into(),
             blocks: 0,
-            atime: f.wrt_time, // `imprecise`
+            atime: f.acc_time,
             mtime: f.wrt_time,
             ctime: f.crt_time, // `imprecise`
             crtime: f.crt_time,

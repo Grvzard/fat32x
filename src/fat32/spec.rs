@@ -5,7 +5,7 @@
 
 use std::time::SystemTime;
 
-use chrono::{NaiveDateTime, TimeZone, Utc};
+use chrono::{Local, TimeZone};
 use scroll::{self, Pread, LE};
 
 pub type ClusNo = u32; // static
@@ -306,18 +306,19 @@ impl DirEntSfn {
     }
 
     fn make_dt(date: &Date, time: &Time) -> Option<SystemTime> {
-        let naive_date = chrono::NaiveDate::from_ymd_opt(
-            1980 + date.year as i32,
-            date.month.into(),
-            date.day.into(),
-        )?;
-        let naive_time = chrono::NaiveTime::from_hms_opt(
-            time.hour.into(),
-            time.minute.into(),
-            time.second.into(),
-        )?;
-        let naive_dt = NaiveDateTime::new(naive_date, naive_time);
-        Some(Utc.from_utc_datetime(&naive_dt).into())
+        Some(
+            Local
+                .with_ymd_and_hms(
+                    1980 + date.year as i32,
+                    date.month.into(),
+                    date.day.into(),
+                    time.hour.into(),
+                    time.minute.into(),
+                    time.second.into(),
+                )
+                .single()?
+                .into(),
+        )
     }
 
     pub fn wrt_time(&self) -> SystemTime {
@@ -333,6 +334,14 @@ impl DirEntSfn {
             let tenth_sec = self.crt_time_tenth / 100;
             let tenth_milsec = self.crt_time_tenth % 100;
             time + std::time::Duration::new(tenth_sec.into(), tenth_milsec as u32 * 1000_1000)
+        } else {
+            SystemTime::UNIX_EPOCH
+        }
+    }
+
+    pub fn last_acc_time(&self) -> SystemTime {
+        if let Some(time) = Self::make_dt(&self.crt_date.into(), &0.into()) {
+            time
         } else {
             SystemTime::UNIX_EPOCH
         }
