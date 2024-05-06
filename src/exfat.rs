@@ -453,13 +453,11 @@ impl<D: Seek + Read> Fio<D> {
                 let sec = self.read_sec(secno);
                 for buf in sec.chunks(DirEnt::SZ) {
                     match DirEnt::try_from(buf) {
-                        Ok(dirent) => {
-                            if matches!(dirent, DirEnt::FinalUnused) {
-                                break 'reading;
-                            } else {
-                                ret.push(dirent)
-                            }
-                        }
+                        Ok(dirent) => match dirent {
+                            DirEnt::Unused => (),
+                            DirEnt::FinalUnused => break 'reading,
+                            _ => ret.push(dirent),
+                        },
                         Err(err) => panic!("[fio] read_dirents: {}", err),
                     }
                 }

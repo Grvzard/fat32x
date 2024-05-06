@@ -100,15 +100,7 @@ fn main() {
                 let clus = fio.read_clus(*read_clus);
                 std::io::stdout().write_all(&clus).unwrap();
             } else if *read_dirents != 0 {
-                let mut ents = fio.read_dirents(*read_dirents);
-                // remove trailing entries of Unused
-                while let Some(last) = ents.last() {
-                    if let exfat::spec::dirent::DirEnt::Unused = last {
-                        ents.pop();
-                    } else {
-                        break;
-                    }
-                }
+                let ents = fio.read_dirents(*read_dirents);
                 println!("{:#?}", ents);
             }
         }
