@@ -4,24 +4,51 @@ use std::time::{Duration, UNIX_EPOCH};
 use fuser::{FileAttr, FileType, Filesystem, ReplyAttr, ReplyOpen, Request};
 use libc::ENOENT;
 
-use crate::fat32::fio;
+use crate::exfat;
+use crate::fat32;
+use crate::fio::{self, Finfo};
 use crate::fs;
 
-pub struct Fat32Fuse<'a> {
-    fs: fs::Fs<'a>,
+pub struct FuseW {
+    fs: fs::Fs,
 }
 
-impl<'a> Fat32Fuse<'a> {
-    pub fn new(devname: &str) -> Self {
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum FsType {
+    Fat32,
+    Exfat,
+}
+
+// impl FromStr for FsType {
+//     type Err = std::io::Error;
+//     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         match s {
+//             "fat32" => Ok(Self::Fat32),
+//             "exfat" => Ok(Self::Exfat),
+//             _ => Err(std::io::Error::new(
+//                 std::io::ErrorKind::InvalidInput,
+//                 "invalid fs type",
+//             )),
+//         }
+//     }
+// }
+
+impl FuseW {
+    pub fn new(devname: &str, typ: FsType) -> Self {
         let device = File::open(devname).unwrap();
-        Fat32Fuse {
-            fs: fs::Fs::new(device),
+        let fio: Box<dyn fio::Fio> = match typ {
+            FsType::Fat32 => Box::new(fat32::fio::Fio::new(device)),
+            FsType::Exfat => Box::new(exfat::Fio::new(device)),
+        };
+        FuseW {
+            fs: fs::Fs::new(fio),
         }
     }
 }
 
-impl From<&fio::Finfo> for FileType {
-    fn from(f: &fio::Finfo) -> Self {
+impl From<&Finfo> for FileType {
+    fn from(f: &Finfo) -> Self {
         if f.is_dir {
             Self::Directory
         } else {
@@ -30,11 +57,11 @@ impl From<&fio::Finfo> for FileType {
     }
 }
 
-impl From<&fio::Finfo> for FileAttr {
-    fn from(f: &fio::Finfo) -> Self {
+impl From<&Finfo> for FileAttr {
+    fn from(f: &Finfo) -> Self {
         FileAttr {
             ino: f.id,
-            size: f.size.into(),
+            size: f.size,
             blocks: 0,
             atime: f.acc_time,
             mtime: f.wrt_time,
@@ -71,7 +98,7 @@ const ROOT_DIR_ATTR: FileAttr = FileAttr {
     blksize: 512,
 };
 
-impl<'a> Filesystem for Fat32Fuse<'a> {
+impl Filesystem for FuseW {
     fn lookup(
         &mut self,
         _req: &Request<'_>,

@@ -3,6 +3,8 @@
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("dir entries reduction failed")]
+    DirEntReductionFailed,
     #[error("dir entries read failed")]
     DirEntReadFailed,
     #[error("scroll read failed")]
@@ -24,7 +26,7 @@ pub mod spec {
         pub fat_offset: u32,
         pub fat_length: u32,
         pub cluster_heap_offset: u32,
-        pub cluster_count: u32,
+        pub cluster_count: u32, // max: 0xFFFFFFF5
         pub first_cluster_of_root_dir: u32,
         pub volumn_serial_number: u32, // `unused`
         pub file_system_revision: [u8; 2], /* check only,
@@ -202,6 +204,10 @@ pub mod spec {
             pub last_mod_tz_off: u8,
             pub last_acc_tz_off: u8,
             pub reserved_2: [u8; 7], // `unused`
+
+            // the on-disk position (clus_no and offset in that cluster) of this entry
+            pub ent_clusno: u32,
+            pub ent_off: u32,
         }
         #[derive(Debug)]
         pub struct StreamExt {
@@ -221,6 +227,61 @@ pub mod spec {
             pub filename: [u16; 15],
         }
 
+        impl FileOrDir {
+            pub fn is_rdonly(&self) -> bool {
+                self.file_attributes & 0x01u16 != 0
+            }
+            pub fn is_hidden(&self) -> bool {
+                self.file_attributes & 0x02u16 != 0
+            }
+            pub fn is_system(&self) -> bool {
+                self.file_attributes & 0x04u16 != 0
+            }
+            pub fn is_dir(&self) -> bool {
+                self.file_attributes & 0x10u16 != 0
+            }
+            #[allow(dead_code)]
+            pub fn is_archive(&self) -> bool {
+                self.file_attributes & 0x20u16 != 0
+            }
+        }
+
+        impl From<&FileName> for String {
+            fn from(ent: &FileName) -> Self {
+                let mut term_idx = 15; // 15: ent.filename.len()
+                for (i, &c) in ent.filename.iter().enumerate() {
+                    if c == 0x0000u16 {
+                        term_idx = i;
+                        break;
+                    }
+                }
+                String::from_utf16_lossy(&ent.filename[0..term_idx])
+            }
+        }
+
+        pub enum EntrySet {
+            FileOrDir(FileOrDir),
+            StreamExt(StreamExt),
+            FileName(FileName),
+        }
+
+        impl EntrySet {
+            pub fn is_primary(&self) -> bool {
+                matches!(*self, Self::FileOrDir(_))
+            }
+        }
+
+        impl From<DirEnt> for Option<EntrySet> {
+            fn from(ent: DirEnt) -> Self {
+                match ent {
+                    DirEnt::FileOrDir(ent) => Some(EntrySet::FileOrDir(ent)),
+                    DirEnt::StreamExt(ent) => Some(EntrySet::StreamExt(ent)),
+                    DirEnt::FileName(ent) => Some(EntrySet::FileName(ent)),
+                    _ => None,
+                }
+            }
+        }
+
         #[derive(Debug)]
         pub enum DirEnt {
             AllocBitmap(AllocBitmap),
@@ -233,15 +294,12 @@ pub mod spec {
             FinalUnused,
         }
 
+        use crate::exfat::Error;
         impl DirEnt {
             pub const SZ: usize = 32;
-        }
-
-        impl TryFrom<&[u8]> for DirEnt {
-            type Error = crate::exfat::Error;
-            fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
+            pub fn new(buf: &[u8], clusno: u32, offset: u32) -> Result<Self, Error> {
                 if buf.len() < 32 {
-                    return Err(Self::Error::DirEntReadFailed);
+                    return Err(Error::DirEntReadFailed);
                 }
                 let entry_type_byte: u8 = buf.pread_with(0, LE)?;
                 let entry_type: Type = entry_type_byte.try_into()?;
@@ -278,6 +336,8 @@ pub mod spec {
                         last_mod_tz_off: buf.pread_with(23, LE)?,
                         last_acc_tz_off: buf.pread_with(24, LE)?,
                         reserved_2: buf.pread_with(25, LE)?,
+                        ent_clusno: clusno,
+                        ent_off: offset,
                     })),
                     Type::StreamExt => Ok(Self::StreamExt(StreamExt {
                         gen_secondary_flags: buf.pread_with(1, LE)?,
@@ -323,12 +383,16 @@ pub mod spec {
 
 use std::{
     io::{Read, Seek, SeekFrom},
-    vec,
+    time::SystemTime,
 };
 
 use scroll::{Pread, LE};
 
-use spec::{dirent::DirEnt, BootSec, FatEnt};
+use crate::fio::{self, Finfo};
+use spec::{
+    dirent::{DirEnt, EntrySet},
+    BootSec, FatEnt,
+};
 
 const SEC_SZ: usize = 512;
 type Sec = [u8; SEC_SZ];
@@ -336,6 +400,8 @@ type Sec = [u8; SEC_SZ];
 #[allow(dead_code)]
 pub struct Fio<D: Seek + Read> {
     device: D,
+    root_clusno: u32,
+    bitmap_clusno: u32,
     sec_sz: u32,
     secs_per_clus: u32,
     clus_heap_offset: u32, // in sectors
@@ -356,8 +422,10 @@ impl<D: Seek + Read> Fio<D> {
 
         let bootsec = BootSec::new(&buf).unwrap();
         assert!(bootsec.is_valid());
-        Fio {
+        let mut fio = Fio {
             device,
+            root_clusno: bootsec.first_cluster_of_root_dir,
+            bitmap_clusno: 0,
             sec_sz: bootsec.bytes_per_sec(),
             secs_per_clus: bootsec.secs_per_clus(),
             clus_heap_offset: bootsec.cluster_heap_offset,
@@ -367,7 +435,18 @@ impl<D: Seek + Read> Fio<D> {
             fat_offset: bootsec.fat_offset,
             dirents_per_sec: bootsec.bytes_per_sec() / 32,
             bootsec,
+        };
+
+        let root_ents = fio.read_dirents(fio.root_clusno);
+        if let Some(DirEnt::AllocBitmap(allocmap)) = root_ents
+            .into_iter()
+            .find(|ent| matches!(ent, DirEnt::AllocBitmap(_)))
+        {
+            fio.bitmap_clusno = allocmap.first_cluster;
+        } else {
+            panic!("[fio] init: allocation map not found in root dir");
         }
+        fio
     }
 
     pub fn read_clus(&mut self, clusno: u32) -> Vec<u8> {
@@ -400,12 +479,16 @@ impl<D: Seek + Read> Fio<D> {
             return FatEnt::Reserved;
         }
         // TODO: check out the bitmap first
+        // if !self.read_allocbit(clusno) {
+        //     return FatEnt::Free;
+        // }
         let sec_no = clusno / self.dirents_per_sec;
         let ent_off = (clusno % self.dirents_per_sec) as usize;
         let sec = self.read_sec((self.fat_offset + sec_no).into());
         let off = FatEnt::SZ * ent_off;
         let ent: u32 = sec.pread_with(off, LE).unwrap();
 
+        println!("{}", ent);
         if ent <= self.clus_cnt + 1 {
             if ent >= 2 {
                 FatEnt::Chain(ent)
@@ -421,6 +504,9 @@ impl<D: Seek + Read> Fio<D> {
         }
     }
 
+    // TODO
+    // fn read_allocbit(&mut self, clusno: u32) -> bool {}
+
     // walking the fat chain, return cluster numbers including the first one
     fn walk_fats(&mut self, mut clusno: u32) -> Vec<u32> {
         let mut ret = vec![];
@@ -431,7 +517,11 @@ impl<D: Seek + Read> Fio<D> {
                 FatEnt::Chain(next) => clusno = next,
                 FatEnt::BadCluster => panic!("[fio] walk_fats: read a bad clustor"),
                 FatEnt::EndOfChain => break,
-                FatEnt::Reserved => panic!("[fio] walk_fats: read a reserved fat entry"),
+                FatEnt::Reserved => {
+                    // TODO: after complete read_allocbit
+                    break;
+                    // panic!("[fio] walk_fats: reserved fat entry (clusno:{})", clusno)
+                }
             }
         }
         ret
@@ -449,10 +539,11 @@ impl<D: Seek + Read> Fio<D> {
 
         let clusno_list = self.walk_fats(clusno);
         'reading: for clusno in clusno_list.into_iter() {
+            let mut off = 0;
             for secno in self.secnos_of_clusno(clusno) {
                 let sec = self.read_sec(secno);
                 for buf in sec.chunks(DirEnt::SZ) {
-                    match DirEnt::try_from(buf) {
+                    match DirEnt::new(buf, clusno, off) {
                         Ok(dirent) => match dirent {
                             DirEnt::Unused => (),
                             DirEnt::FinalUnused => break 'reading,
@@ -460,9 +551,86 @@ impl<D: Seek + Read> Fio<D> {
                         },
                         Err(err) => panic!("[fio] read_dirents: {}", err),
                     }
+                    off += 1;
                 }
             }
         }
         ret
+    }
+}
+
+impl TryFrom<Vec<EntrySet>> for fio::Finfo {
+    type Error = Error;
+    fn try_from(ents: Vec<EntrySet>) -> Result<Self, Self::Error> {
+        if ents.len() < 3 {
+            return Err(Self::Error::DirEntReductionFailed);
+        }
+
+        let (ent_file, ent_stream) = match (&ents[0], &ents[1]) {
+            (EntrySet::FileOrDir(ent0), EntrySet::StreamExt(ent1)) => (ent0, ent1),
+            _ => return Err(Self::Error::DirEntReductionFailed),
+        };
+
+        let mut name = String::new();
+        for ent in ents[2..].iter() {
+            let ent_name = match ent {
+                EntrySet::FileName(ent_name) => ent_name,
+                _ => return Err(Self::Error::DirEntReductionFailed),
+            };
+            name.push_str(&String::from(ent_name));
+        }
+
+        // TODO
+        // 'check: {}
+
+        Ok(Finfo {
+            id: (ent_file.ent_off as u64) << 32 | ent_file.ent_clusno as u64,
+            name,
+            acc_time: SystemTime::now(),
+            crt_time: SystemTime::now(),
+            wrt_time: SystemTime::now(),
+            fst_clus: ent_stream.first_cluster,
+            is_dir: ent_file.is_dir(),
+            is_hidden: ent_file.is_hidden(),
+            is_rdonly: ent_file.is_rdonly(),
+            is_system: ent_file.is_system(),
+            size32: 0,
+            size: ent_stream.valid_data_length,
+        })
+    }
+}
+
+impl<D: Seek + Read> fio::Fio for Fio<D> {
+    fn list_dir(&mut self, clusno: u32) -> Vec<fio::Finfo> {
+        let mut ret = vec![];
+        let ents = self.read_dirents(clusno);
+        let mut pending_list = vec![];
+
+        for ent in ents.into_iter() {
+            if let Some(set_ent) = Option::<EntrySet>::from(ent) {
+                if set_ent.is_primary() && !pending_list.is_empty() {
+                    if let Ok(fi) = fio::Finfo::try_from(pending_list) {
+                        ret.push(fi);
+                    } else {
+                        println!("[fio] list_dir: dirents reduction failed");
+                    };
+                    pending_list = vec![];
+                }
+                pending_list.push(set_ent);
+            }
+        }
+
+        ret
+    }
+
+    fn list_root(&mut self) -> Vec<fio::Finfo> {
+        self.list_dir(self.root_clusno)
+    }
+
+    fn read_file(&mut self, fi: &fio::Finfo, offset: u32, size: u32) -> Vec<u8> {
+        let _ = fi;
+        let _ = offset;
+        let _ = size;
+        vec![]
     }
 }

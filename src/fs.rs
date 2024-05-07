@@ -1,38 +1,30 @@
-use core::panic;
 use std::{collections::BTreeMap, rc::Rc, vec};
 
-use crate::device::Device;
-use crate::fat32::fio::{Finfo, Fio};
+use crate::fio::{Finfo, Fio};
 
 type DirMap = BTreeMap<u64, Vec<Rc<Finfo>>>;
 type FinfoMap = BTreeMap<u64, Rc<Finfo>>;
 
 // #[allow(dead_code)]
-pub struct Fs<'a> {
-    fio: Fio<'a>,
+pub struct Fs {
     dirmap: DirMap,
     fmap: FinfoMap,
     filesopen: BTreeMap<u64, u32>,
+    fio: Box<dyn Fio>,
 }
 
 // #[allow(dead_code)]
-impl<'a> Fs<'a> {
-    pub fn new(device: impl Device + 'a) -> Self {
-        let fio = Fio::new(device);
+impl Fs {
+    pub fn new(fio: Box<dyn Fio>) -> Self {
         let dirmap = DirMap::new();
         let fmap = FinfoMap::new();
         let mut fs = Fs {
-            fio,
             dirmap,
             fmap,
             filesopen: BTreeMap::new(),
+            fio,
         };
-        let rootfiles: Vec<Rc<Finfo>> = fs
-            .fio
-            .read_dirents(fs.fio.root_clusno)
-            .into_iter()
-            .map(Rc::new)
-            .collect();
+        let rootfiles: Vec<Rc<Finfo>> = fs.fio.list_root().into_iter().map(Rc::new).collect();
 
         rootfiles.iter().for_each(|rc_fi| {
             fs.fmap.insert(rc_fi.id, rc_fi.clone());
@@ -47,7 +39,7 @@ impl<'a> Fs<'a> {
             if let Some(di) = self.fmap.get(&id) {
                 let rc_files = if di.fst_clus != 0 {
                     self.fio
-                        .read_dirents(di.fst_clus)
+                        .list_dir(di.fst_clus)
                         .into_iter()
                         .map(Rc::new)
                         .collect()
@@ -103,6 +95,6 @@ impl<'a> Fs<'a> {
     pub fn read(&mut self, id: u64, offset: u32, size: u32) -> Option<Vec<u8>> {
         self.fmap
             .get(&id)
-            .map(|fi| self.fio.readfile(fi, offset, size))
+            .map(|fi| self.fio.read_file(fi, offset, size))
     }
 }

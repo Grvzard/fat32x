@@ -1,7 +1,8 @@
-use std::{cmp::min, io::SeekFrom, time::SystemTime, vec};
+use std::{cmp::min, io::SeekFrom, vec};
 
 use super::spec::{BootSec, ClusNo, DirEnt, DirEntLfn, FatEnt};
 use crate::device::Device;
+use crate::fio::{self, Finfo};
 
 #[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
@@ -197,10 +198,10 @@ impl<'a> Fio<'a> {
     }
 
     pub fn readfile(&mut self, fi: &Finfo, offset: u32, size: u32) -> Vec<u8> {
-        if offset >= fi.size || size == 0 {
+        if offset >= fi.size32 || size == 0 {
             return vec![];
         }
-        let sz = min(size, fi.size - offset);
+        let sz = min(size, fi.size32 - offset);
         let start_clus = offset / self.clus_sz;
         let start_off = (offset % self.clus_sz) as usize;
         let end_clus = (offset + sz - 1) / self.clus_sz;
@@ -222,20 +223,18 @@ impl<'a> Fio<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Finfo {
-    pub id: u64, // a unique id consists of entry's clus_no and offset
-    pub name: String,
-    pub is_rdonly: bool,
-    pub is_hidden: bool,
-    pub is_system: bool,
-    pub is_dir: bool,
-    // pub is_archive: bool,
-    pub size: u32,
-    pub fst_clus: u32,
-    pub crt_time: SystemTime,
-    pub wrt_time: SystemTime,
-    pub acc_time: SystemTime,
+impl<'a> fio::Fio for Fio<'a> {
+    fn list_dir(&mut self, no: u32) -> Vec<Finfo> {
+        self.read_dirents(no)
+    }
+
+    fn list_root(&mut self) -> Vec<Finfo> {
+        self.readroot()
+    }
+
+    fn read_file(&mut self, fi: &Finfo, offset: u32, size: u32) -> Vec<u8> {
+        self.readfile(fi, offset, size)
+    }
 }
 
 impl TryFrom<Vec<DirEnt>> for Finfo {
@@ -305,7 +304,8 @@ impl TryFrom<Vec<DirEnt>> for Finfo {
             is_dir: sfn.is_dir(),
             is_hidden: sfn.is_hidden(),
             is_system: sfn.is_system(),
-            size: sfn.file_size,
+            size32: sfn.file_size,
+            size: sfn.file_size.into(),
             fst_clus: sfn.fst_clus(),
             crt_time: sfn.crt_time(),
             wrt_time: sfn.wrt_time(),
