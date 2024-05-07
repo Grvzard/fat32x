@@ -126,9 +126,41 @@ pub mod spec {
         })
     }
 
+    #[derive(Debug)]
+    pub struct DateTime {
+        pub year: u8,
+        pub month: u8,
+        pub day: u8,
+        pub hour: u8,
+        pub minute: u8,
+        pub second: u8,
+    }
+
+    impl From<u32> for DateTime {
+        fn from(val: u32) -> Self {
+            let year = (val >> (9 + 16)) as u8;
+            let month = (val >> (5 + 16) & 0xF) as u8;
+            let day = (val >> 16 & 0x1F) as u8;
+            let hour = (val >> 11 & 0x1F) as u8;
+            let minute = (val >> 5 & 0x3F) as u8;
+            let second = (val & 0x1F) as u8;
+            DateTime {
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+            }
+        }
+    }
+
     pub mod dirent {
         // use std::fmt;
 
+        use std::time::{Duration, SystemTime};
+
+        use chrono::{FixedOffset, TimeZone};
         use scroll::{Pread, LE};
 
         enum Type {
@@ -243,6 +275,50 @@ pub mod spec {
             #[allow(dead_code)]
             pub fn is_archive(&self) -> bool {
                 self.file_attributes & 0x20u16 != 0
+            }
+
+            fn make_time(datetime: u32, tz_off: u8) -> Option<SystemTime> {
+                let dt = super::DateTime::from(datetime);
+                const QUARTER: i32 = 15 * 60;
+                let tz = if tz_off & 0x80 != 0 {
+                    let val = (tz_off - 0x80) as i32;
+                    if val < 0x40 {
+                        FixedOffset::east_opt(val * QUARTER)?
+                    } else {
+                        FixedOffset::west_opt(((val ^ 0x7F) + 1) * QUARTER)?
+                    }
+                } else {
+                    FixedOffset::east_opt(0)?
+                };
+                Some(
+                    tz.with_ymd_and_hms(
+                        1980 + dt.year as i32,
+                        dt.month.into(),
+                        dt.day.into(),
+                        dt.hour.into(),
+                        dt.minute.into(),
+                        dt.second.into(),
+                    )
+                    .single()?
+                    .into(),
+                )
+            }
+
+            pub fn crt_time(&self) -> SystemTime {
+                Self::make_time(self.create_dt, self.create_tz_off)
+                    .map(|time| time + Duration::new(0, self.create_10ms_incr as u32 * 10_000_000))
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+            }
+            pub fn mod_time(&self) -> SystemTime {
+                Self::make_time(self.last_mod_dt, self.last_mod_tz_off)
+                    .map(|time| {
+                        time + Duration::new(0, self.last_mod_10ms_incr as u32 * 10_000_000)
+                    })
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+            }
+            pub fn acc_time(&self) -> SystemTime {
+                Self::make_time(self.last_acc_dt, self.last_acc_tz_off)
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
             }
         }
 
@@ -381,10 +457,7 @@ pub mod spec {
     }
 }
 
-use std::{
-    io::{Read, Seek, SeekFrom},
-    time::SystemTime,
-};
+use std::io::{Read, Seek, SeekFrom};
 
 use scroll::{Pread, LE};
 
@@ -586,9 +659,9 @@ impl TryFrom<Vec<EntrySet>> for fio::Finfo {
         Ok(Finfo {
             id: (ent_file.ent_off as u64) << 32 | ent_file.ent_clusno as u64,
             name,
-            acc_time: SystemTime::now(),
-            crt_time: SystemTime::now(),
-            wrt_time: SystemTime::now(),
+            acc_time: ent_file.acc_time(),
+            crt_time: ent_file.crt_time(),
+            wrt_time: ent_file.mod_time(),
             fst_clus: ent_stream.first_cluster,
             is_dir: ent_file.is_dir(),
             is_hidden: ent_file.is_hidden(),
