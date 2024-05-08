@@ -4,13 +4,18 @@ mod fat32;
 mod fat32fuse;
 mod fio;
 mod fs;
+mod mbr;
 
-use std::{fs::File, io::Write};
+use std::{
+    fs::File,
+    io::{Read, Write},
+};
 
 use clap::{builder::PossibleValue, Parser, Subcommand};
 use fuser::MountOption;
 
 use fat32fuse::{FsType, FuseW};
+use mbr::Mbr;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -55,6 +60,9 @@ enum Commands {
         read_clus: u32,
         #[arg(long, group = "instr", default_value_t = 0, value_name = "ClusNo")]
         read_dirents: u32,
+    },
+    Mbr {
+        device: String,
     },
 }
 
@@ -122,6 +130,13 @@ fn main() {
                 let ents = fio.read_dirents(*read_dirents);
                 println!("{:#?}", ents);
             }
+        }
+        Commands::Mbr { device } => {
+            let mut file = File::open(device).expect("device can't be opened");
+            let mut buf = [0u8; 512];
+            file.read_exact(&mut buf).unwrap();
+            let mbr = Mbr::new(&buf).unwrap();
+            println!("{:X?}", mbr);
         }
     }
 }
