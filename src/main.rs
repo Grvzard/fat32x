@@ -1,5 +1,6 @@
 mod device;
 mod exfat;
+mod ext2;
 mod fat32;
 mod fat32fuse;
 mod fio;
@@ -60,6 +61,11 @@ enum Commands {
         read_clus: u32,
         #[arg(long, group = "instr", default_value_t = 0, value_name = "ClusNo")]
         read_dirents: u32,
+    },
+    Ext2 {
+        device: String,
+        #[arg(short, long, group = "instr")]
+        info: bool,
     },
     Mbr {
         device: String,
@@ -129,6 +135,13 @@ fn main() {
             } else if *read_dirents != 0 {
                 let ents = fio.read_dirents(*read_dirents);
                 println!("{:#?}", ents);
+            }
+        }
+        Commands::Ext2 { device, info } => {
+            let file = File::open(device).expect("device can't be opened");
+            let fio = ext2::Fio::new(file);
+            if *info {
+                println!("{:?}", fio.sblk);
             }
         }
         Commands::Mbr { device } => {
