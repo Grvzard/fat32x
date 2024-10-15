@@ -200,14 +200,14 @@ pub mod spec {
             }
         }
 
-        #[derive(Debug)]
+        #[derive(Debug, scroll::Pread)]
         pub struct AllocBitmap {
             pub bitmap_flags: u8,
             pub reserved: [u8; 18], // `unused`
             pub first_cluster: u32,
             pub data_length: u64,
         }
-        #[derive(Debug)]
+        #[derive(Debug, scroll::Pread)]
         pub struct UpcaseTable {
             pub reserved_1: [u8; 3], // `unused`
             pub table_checksum: u32,
@@ -215,13 +215,13 @@ pub mod spec {
             pub first_cluster: u32,
             pub data_length: u64,
         }
-        #[derive(Debug)]
+        #[derive(Debug, scroll::Pread)]
         pub struct VolumnLabel {
             pub chars_cnt: u8, // 0..=11
             pub volumn_label: [u16; 11],
             pub reserved: [u8; 8], // `unused`
         }
-        #[derive(Debug)]
+        #[derive(Debug, scroll::Pread)]
         pub struct FileOrDir {
             pub secondary_cnt: u8,
             pub set_checksum: u16,
@@ -236,12 +236,8 @@ pub mod spec {
             pub last_mod_tz_off: u8,
             pub last_acc_tz_off: u8,
             pub reserved_2: [u8; 7], // `unused`
-
-            // the on-disk position (clus_no and offset in that cluster) of this entry
-            pub ent_clusno: u32,
-            pub ent_off: u32,
         }
-        #[derive(Debug)]
+        #[derive(Debug, scroll::Pread)]
         pub struct StreamExt {
             pub gen_secondary_flags: u8,
             pub reserved_1: [u8; 1], // `unused`
@@ -253,7 +249,7 @@ pub mod spec {
             pub first_cluster: u32,
             pub data_length: u64,
         }
-        #[derive(Debug)]
+        #[derive(Debug, scroll::Pread)]
         pub struct FileName {
             pub gen_secondary_flags: u8, // `unused`, zero
             pub filename: [u16; 15],
@@ -336,21 +332,22 @@ pub mod spec {
         }
 
         pub enum EntrySet {
-            FileOrDir(FileOrDir),
+            // (u32, u32): the on-disk position (clus_no, offset in that cluster) of this entry
+            FileOrDir(FileOrDir, (u32, u32)),
             StreamExt(StreamExt),
             FileName(FileName),
         }
 
         impl EntrySet {
             pub fn is_primary(&self) -> bool {
-                matches!(*self, Self::FileOrDir(_))
+                matches!(*self, Self::FileOrDir(..))
             }
         }
 
         impl From<DirEnt> for Option<EntrySet> {
             fn from(ent: DirEnt) -> Self {
                 match ent {
-                    DirEnt::FileOrDir(ent) => Some(EntrySet::FileOrDir(ent)),
+                    DirEnt::FileOrDir(ent, pos) => Some(EntrySet::FileOrDir(ent, pos)),
                     DirEnt::StreamExt(ent) => Some(EntrySet::StreamExt(ent)),
                     DirEnt::FileName(ent) => Some(EntrySet::FileName(ent)),
                     _ => None,
@@ -363,7 +360,7 @@ pub mod spec {
             AllocBitmap(AllocBitmap),
             UpcaseTable(UpcaseTable),
             VolumnLabel(VolumnLabel),
-            FileOrDir(FileOrDir),
+            FileOrDir(FileOrDir, (u32, u32)),
             StreamExt(StreamExt),
             FileName(FileName),
             Unused,
@@ -379,57 +376,16 @@ pub mod spec {
                 }
                 let entry_type_byte: u8 = buf.pread_with(0, LE)?;
                 let entry_type: Type = entry_type_byte.try_into()?;
+                let rest = &buf[1..];
                 match entry_type {
-                    Type::AllocBitmap => Ok(Self::AllocBitmap(AllocBitmap {
-                        bitmap_flags: buf.pread_with(1, LE)?,
-                        reserved: buf.pread_with(2, LE)?,
-                        first_cluster: buf.pread_with(20, LE)?,
-                        data_length: buf.pread_with(24, LE)?,
-                    })),
-                    Type::UpcaseTable => Ok(Self::UpcaseTable(UpcaseTable {
-                        reserved_1: buf.pread_with(1, LE)?,
-                        table_checksum: buf.pread_with(4, LE)?,
-                        reserved_2: buf.pread_with(8, LE)?,
-                        first_cluster: buf.pread_with(20, LE)?,
-                        data_length: buf.pread_with(24, LE)?,
-                    })),
-                    Type::VolumnLabel => Ok(Self::VolumnLabel(VolumnLabel {
-                        chars_cnt: buf.pread_with(1, LE)?,
-                        volumn_label: buf.pread_with(2, LE)?,
-                        reserved: buf.pread_with(24, LE)?,
-                    })),
-                    Type::FileOrDir => Ok(Self::FileOrDir(FileOrDir {
-                        secondary_cnt: buf.pread_with(1, LE)?,
-                        set_checksum: buf.pread_with(2, LE)?,
-                        file_attributes: buf.pread_with(4, LE)?,
-                        reserved_1: buf.pread_with(6, LE)?,
-                        create_dt: buf.pread_with(8, LE)?,
-                        last_mod_dt: buf.pread_with(12, LE)?,
-                        last_acc_dt: buf.pread_with(16, LE)?,
-                        create_10ms_incr: buf.pread_with(20, LE)?,
-                        last_mod_10ms_incr: buf.pread_with(21, LE)?,
-                        create_tz_off: buf.pread_with(22, LE)?,
-                        last_mod_tz_off: buf.pread_with(23, LE)?,
-                        last_acc_tz_off: buf.pread_with(24, LE)?,
-                        reserved_2: buf.pread_with(25, LE)?,
-                        ent_clusno: clusno,
-                        ent_off: offset,
-                    })),
-                    Type::StreamExt => Ok(Self::StreamExt(StreamExt {
-                        gen_secondary_flags: buf.pread_with(1, LE)?,
-                        reserved_1: buf.pread_with(2, LE)?,
-                        name_length: buf.pread_with(3, LE)?,
-                        name_hash: buf.pread_with(4, LE)?,
-                        reserved_2: buf.pread_with(6, LE)?,
-                        valid_data_length: buf.pread_with(8, LE)?,
-                        reserved_3: buf.pread_with(16, LE)?,
-                        first_cluster: buf.pread_with(20, LE)?,
-                        data_length: buf.pread_with(24, LE)?,
-                    })),
-                    Type::FileName => Ok(Self::FileName(FileName {
-                        gen_secondary_flags: buf.pread_with(1, LE)?,
-                        filename: buf.pread_with(2, LE)?,
-                    })),
+                    Type::AllocBitmap => Ok(Self::AllocBitmap(rest.pread_with(0, LE)?)),
+                    Type::UpcaseTable => Ok(Self::UpcaseTable(rest.pread_with(0, LE)?)),
+                    Type::VolumnLabel => Ok(Self::VolumnLabel(rest.pread_with(0, LE)?)),
+                    Type::FileOrDir => {
+                        Ok(Self::FileOrDir(rest.pread_with(0, LE)?, (clusno, offset)))
+                    }
+                    Type::StreamExt => Ok(Self::StreamExt(rest.pread_with(0, LE)?)),
+                    Type::FileName => Ok(Self::FileName(rest.pread_with(0, LE)?)),
                     Type::Unused => Ok(DirEnt::Unused),
                     Type::FinalUnused => Ok(DirEnt::FinalUnused),
                 }
@@ -639,8 +595,10 @@ impl TryFrom<Vec<EntrySet>> for fio::Finfo {
             return Err(Self::Error::DirEntReductionFailed);
         }
 
-        let (ent_file, ent_stream) = match (&ents[0], &ents[1]) {
-            (EntrySet::FileOrDir(ent0), EntrySet::StreamExt(ent1)) => (ent0, ent1),
+        let (ent_file, ent_clusno, ent_off, ent_stream) = match (&ents[0], &ents[1]) {
+            (EntrySet::FileOrDir(ent0, (ent_clusno, ent_off)), EntrySet::StreamExt(ent1)) => {
+                (ent0, *ent_clusno, *ent_off, ent1)
+            }
             _ => return Err(Self::Error::DirEntReductionFailed),
         };
 
@@ -657,7 +615,7 @@ impl TryFrom<Vec<EntrySet>> for fio::Finfo {
         // 'check: {}
 
         Ok(Finfo {
-            id: (ent_file.ent_off as u64) << 32 | ent_file.ent_clusno as u64,
+            id: (ent_off as u64) << 32 | ent_clusno as u64,
             name,
             acc_time: ent_file.acc_time(),
             crt_time: ent_file.crt_time(),
