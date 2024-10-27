@@ -49,6 +49,7 @@ pub struct BootSec {
 #[allow(dead_code)]
 impl BootSec {
     pub fn new(buf: &mut [u8; 512]) -> Result<Self, scroll::Error> {
+        // TODO
         Ok(BootSec {
             bs_oem_name: buf.pread_with(3, LE)?,
             bpb_byts_per_sec: buf.pread_with(11, LE)?,

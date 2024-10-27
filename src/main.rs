@@ -1,11 +1,9 @@
+pub mod spec;
+
 mod device;
-mod exfat;
-mod ext2;
-mod fat32;
-mod fat32fuse;
 mod fio;
 mod fs;
-mod mbr;
+mod fuse_wrapper;
 
 use std::{
     fs::File,
@@ -15,8 +13,8 @@ use std::{
 use clap::{builder::PossibleValue, Parser, Subcommand};
 use fuser::MountOption;
 
-use fat32fuse::{FsType, FuseW};
-use mbr::Mbr;
+use fuse_wrapper::{FsType, FuseW};
+use spec::mbr::Mbr;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -111,7 +109,9 @@ fn main() {
             info,
             read_clus,
         } => {
-            let mut fio = fat32::fio::Fio::new(File::open(device).unwrap());
+            use fio::fat32::Fio;
+
+            let mut fio = Fio::new(File::open(device).unwrap());
             if *info {
                 println!("{:?}", fio.bootsec)
             } else if *read_clus != 0 {
@@ -125,8 +125,10 @@ fn main() {
             read_clus,
             read_dirents,
         } => {
+            use fio::exfat::Fio;
+
             let file = File::open(device).expect("device can't be opened");
-            let mut fio = exfat::Fio::new(file);
+            let mut fio = Fio::new(file);
             if *info {
                 println!("{:?}", fio.bootsec)
             } else if *read_clus != 0 {
@@ -138,8 +140,10 @@ fn main() {
             }
         }
         Commands::Ext2 { device, info } => {
+            use fio::ext2::Fio;
+
             let file = File::open(device).expect("device can't be opened");
-            let fio = ext2::Fio::new(file);
+            let fio = Fio::new(file);
             if *info {
                 println!("{:?}", fio.sblk);
             }

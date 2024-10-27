@@ -4,8 +4,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use fuser::{FileAttr, FileType, Filesystem, ReplyAttr, ReplyOpen, Request};
 use libc::ENOENT;
 
-use crate::exfat;
-use crate::fat32;
 use crate::fio::{self, Finfo};
 use crate::fs;
 
@@ -38,8 +36,8 @@ impl FuseW {
     pub fn new(devname: &str, typ: FsType) -> Self {
         let device = File::open(devname).unwrap();
         let fio: Box<dyn fio::Fio> = match typ {
-            FsType::Fat32 => Box::new(fat32::fio::Fio::new(device)),
-            FsType::Exfat => Box::new(exfat::Fio::new(device)),
+            FsType::Fat32 => Box::new(fio::fat32::Fio::new(device)),
+            FsType::Exfat => Box::new(fio::exfat::Fio::new(device)),
         };
         FuseW {
             fs: fs::Fs::new(fio),

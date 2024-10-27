@@ -1,8 +1,8 @@
 use std::{cmp::min, io::SeekFrom, vec};
 
-use super::spec::{BootSec, ClusNo, DirEnt, DirEntLfn, FatEnt};
 use crate::device::Device;
 use crate::fio::{self, Finfo};
+use crate::spec::fat32::{BootSec, ClusNo, DirEnt, DirEntLfn, FatEnt};
 
 #[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]

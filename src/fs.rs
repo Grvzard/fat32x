@@ -35,7 +35,7 @@ impl Fs {
     }
 
     pub fn readdir(&mut self, id: u64) -> &Vec<Rc<Finfo>> {
-        if self.dirmap.get(&id).is_none() {
+        if let std::collections::btree_map::Entry::Occupied(mut e) = self.dirmap.entry(id) {
             if let Some(di) = self.fmap.get(&id) {
                 let rc_files = if di.fst_clus != 0 {
                     self.fio
@@ -49,7 +49,7 @@ impl Fs {
                 rc_files.iter().for_each(|rc_fi| {
                     self.fmap.insert(rc_fi.id, rc_fi.clone());
                 });
-                self.dirmap.insert(id, rc_files);
+                e.insert(rc_files);
             } else {
                 panic!("fs: readdir")
             }
